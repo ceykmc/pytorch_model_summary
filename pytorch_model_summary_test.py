@@ -30,7 +30,7 @@ def reset_net_test(max_depth):
 
 
 def vgg16_test(max_depth):
-    model = tv_models.resnet50()
+    model = tv_models.vgg16()
     input_size = (3, 224, 224)
     model_summary = PyTorchModelSummary(model, input_size)
     model_summary.summary(max_depth)

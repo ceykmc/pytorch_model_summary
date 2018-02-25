@@ -7,7 +7,6 @@ import torch.nn as nn
 from torch.autograd import Variable
 import pandas as pd
 from profile import hook_count_function
-import numpy as np
 
 pd.set_option('display.width', 1000)
 pd.set_option('display.max_rows', 10000)
@@ -36,10 +35,10 @@ class PyTorchModelSummary(object):
 
         module.register_buffer('input_shape', torch.IntTensor())
         module.register_buffer('output_shape', torch.IntTensor())
-        module.register_buffer('nb_params', 0)
-        module.register_buffer('memory', 0.0)
-        module.register_buffer('total_ops', 0)
-        module.register_buffer('duration', 0.0)
+        module.register_buffer('nb_params', torch.IntTensor([0]))
+        module.register_buffer('memory', torch.FloatTensor([0.0]))
+        module.register_buffer('total_ops', torch.IntTensor([0]))
+        module.register_buffer('duration', torch.FloatTensor([0.0]))
 
     @staticmethod
     def _get_module_summary(name, module):
@@ -57,6 +56,7 @@ class PyTorchModelSummary(object):
         df['memory'] = df['memory'].apply(lambda x: '{:.2f}MB'.format(x))
         df['duration'] = df['duration'].apply(lambda x: '{:.2f}ms'.format(x * 1000))
         df['duration_percent'] = df['duration_percent'].apply(lambda x: '{:.2%}'.format(x))
+        df.columns = ['module name', 'input shape', 'output shape', 'parameters quantity', 'memory', 'opertaion quantity', 'run time', 'run time percent']
         return df
 
     @staticmethod
@@ -150,20 +150,6 @@ class PyTorchModelSummary(object):
                                total_ops=total_ops,
                                duration=duration)
 
-    def _summary_leaf(self):
-        queue = [self.summary_tree]
-        result = []
-        while len(queue) > 0:
-            node = queue[0]
-            del queue[0]
-            if self._is_leaf(node):
-                result.append(self._node_to_print_format(node["children"]["info"]))
-            else:
-                for key in node["children"]:
-                    queue.append(node["children"][key])
-        df = pd.DataFrame(result)
-        return df
-
     def _summary_depth(self, nodes, max_depth, depth=0):
         result = []
         for node in nodes:
@@ -180,4 +166,5 @@ class PyTorchModelSummary(object):
         df = pd.DataFrame(result)
         df['duration_percent'] = df['duration'] / df['duration'].sum()
         df = self._pretty_format(df)
+        df.to_excel('summary.xlsx', 'summary')
         print(df)
