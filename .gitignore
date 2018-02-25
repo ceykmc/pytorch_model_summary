@@ -1,1 +1,4 @@
-summary.txt,summary.html,__pycache__/,.idea/
+summary.txt
+summary.html
+/__pycache__/
+/.idea/
