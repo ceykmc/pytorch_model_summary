@@ -17,6 +17,8 @@ class PyTorchModelSummary(object):
         assert isinstance(model, nn.Module)
         assert isinstance(input_size, (list, tuple))
 
+        self.summary_tree = OrderedDict(fullname='root', children=OrderedDict())  # 统计树
+
         self._model = model
         self._input_size = input_size
         self._origin_call = dict()  # sub module call hook
@@ -25,16 +27,41 @@ class PyTorchModelSummary(object):
         x = Variable(torch.rand(1, *self._input_size))
         self._model(x)
 
+        self._collect_summary()
+
     @staticmethod
     def _register_buffer(module):
         assert isinstance(module, nn.Module)
 
-        module.register_buffer('module_name', torch.IntTensor())
         module.register_buffer('input_shape', torch.IntTensor())
         module.register_buffer('output_shape', torch.IntTensor())
-        module.register_buffer('nb_params', torch.IntTensor())
-        module.register_buffer('total_ops', 0)
-        module.register_buffer('duration', torch.FloatTensor())
+        module.register_buffer('nb_params', torch.IntTensor([0]))
+        module.register_buffer('memory', torch.FloatTensor([0.0]))
+        module.register_buffer('total_ops', torch.IntTensor([0]))
+        module.register_buffer('duration', torch.FloatTensor([0.0]))
+
+    @staticmethod
+    def _get_module_summary(name, module):
+        return OrderedDict(module_name=name + str(module.__class__).split('.')[-1].split("'")[0],
+                           input_shape=module.input_shape.numpy().tolist(),
+                           output_shape=module.output_shape.numpy().tolist(),
+                           parameters_number=int(module.nb_params.numpy()),
+                           memory=float(module.memory.numpy()),
+                           total_ops=int(module.total_ops.numpy()),
+                           duration=float(module.duration.numpy()))
+
+    @staticmethod
+    def _pretty_format(df):
+        df = df.fillna(' ')
+        df['memory'] = df['memory'].apply(lambda x: '{:.2f}MB'.format(x))
+        df['duration'] = df['duration'].apply(lambda x: '{:.2f}ms'.format(x * 1000))
+        df['duration_percent'] = df['duration_percent'].apply(lambda x: '{:.2%}'.format(x))
+        df.columns = ['module name', 'input shape', 'output shape', 'parameters quantity', 'memory', 'opertaion quantity', 'run time', 'run time percent']
+        return df
+
+    @staticmethod
+    def _is_leaf(node):
+        return 'info' in node["children"]
 
     def _sub_module_call_hook(self):
         def wrap_call(module, *input, **kwargs):
@@ -45,10 +72,11 @@ class PyTorchModelSummary(object):
             end = time.time()
             module.duration = torch.FloatTensor([end - start])
 
-            name = str(module.__class__).split('.')[-1].split("'")[0]
-            module.module_name = torch.IntTensor([ord(c) for c in name])
             module.input_shape = torch.IntTensor(list(input[0].size())[1:])
             module.output_shape = torch.IntTensor(list(result.size())[1:])
+            memory = 1
+            for p in result.size():
+                memory *= p
             params = 0
             # iterate through parameters and count num params
             for name, p in module._parameters.items():
@@ -56,7 +84,9 @@ class PyTorchModelSummary(object):
                     continue
                 params += torch.numel(p.data)
             module.nb_params = torch.IntTensor([params])
-
+            memory += params
+            memory = memory * 4 / (1024 ** 2)  # 单位是MB
+            module.memory = torch.FloatTensor([memory])
             return result
 
         for module in self._model.modules():
@@ -69,83 +99,72 @@ class PyTorchModelSummary(object):
         hook_count_function(self._model)
         self._sub_module_call_hook()
 
-    @staticmethod
-    def _test_module(name, module, prefix):
-        module_name = prefix + ('.' if prefix else '') + name + '.' + \
-                      str(module.__class__).split('.')[-1].split("'")[0]
-        input_shape_np = module.input_shape.numpy()
-        input_shape = ' '.join(['{:>3d}'] * len(input_shape_np)).format(*[e for e in input_shape_np])
-        output_shape_np = module.output_shape.numpy()
-        output_shape = ' '.join(['{:>3d}'] * len(output_shape_np)).format(*[e for e in output_shape_np])
-        parameters_number = '{:>5d}'.format(module.nb_params.numpy()[0])
-        total_ops = '{:>5d}'.format(int(module.total_ops.numpy()[0]))
-        duration = '{:.5f}'.format(module.duration.numpy()[0])
-        return OrderedDict(module_name=module_name,
-                           input_shape=input_shape,
-                           output_shape=output_shape,
-                           parameters_number=parameters_number,
-                           total_ops=total_ops,
-                           duration=duration)
-
-    def _get_model_summary(self, model, prefix=''):
-        model_summary = list()
+    def _retrive_modules(self, model, prefix=''):
+        modules = []
         for name, module in model._modules.items():
             if module is None:
                 continue
-            if len(list(module.children())) == 0:
-                info = self._test_module(name, module, prefix)
-                model_summary.append(info)
+            if len(list(module.children())) > 0:
+                modules += self._retrive_modules(module, prefix + ('' if prefix == '' else '.') + name)
             else:
-                model_summary += self._get_model_summary(module, prefix=prefix + ('.' if prefix else '') + name)
-        return model_summary
+                modules.append((prefix + ('' if prefix == '' else '.') + name, module))
+        return modules
 
-    def summary(self):
-        with open('summary.txt', 'w') as f:
-            model_summary = self._get_model_summary(self._model)
-            df = pd.DataFrame(model_summary)
+    def _collect_summary(self):
+        modules = self._retrive_modules(self._model)
+        for name, module in modules:
+            name_parts = name.split('.')
+            node = self.summary_tree["children"]
+            fullname = ''
+            for part in name_parts:
+                fullname += part
+                if part not in node:
+                    node[part] = {
+                        "fullname": fullname,
+                        "children": {}
+                    }
+                node = node[part]["children"]
+                fullname += '.'
+            node['info'] = self._get_module_summary(fullname, module)
 
-            # add duration percent
-            duration = pd.to_numeric(df['duration'])
-            duration_percent = duration / duration.sum()
-            df['duration_percent'] = pd.Series(['{:.3f}%'.format(v * 100) for v in duration_percent])
-            # df.to_pickle('summary.pkl')
-            f.write(str(df))
-            f.write('\n\n')
+    def _aggregate_leaf(self, node):
+        if self._is_leaf(node):
+            return OrderedDict(parameters_number=node["children"]["info"]["parameters_number"],
+                               memory=node["children"]["info"]["memory"],
+                               total_ops=node["children"]["info"]["total_ops"],
+                               duration=node["children"]["info"]["duration"])
+        else:
+            parameters_number = 0
+            memory = 0
+            total_ops = 0
+            duration = 0
+            for key in node["children"]:
+                son = self._aggregate_leaf(node["children"][key])
+                parameters_number += son["parameters_number"]
+                memory += son["memory"]
+                total_ops += son["total_ops"]
+                duration += son["duration"]
+            return OrderedDict(module_name=node["fullname"],
+                               parameters_number=parameters_number,
+                               memory=memory,
+                               total_ops=total_ops,
+                               duration=duration)
 
-            module_time = []
-            for name, module in self._model._modules.items():
-                if len(list(module.children())) == 0:
-                    continue
-                f.write('module {}\n'.format(name))
-                model_summary = self._get_model_summary(module, name)
-                df = pd.DataFrame(model_summary)
+    def _summary_depth(self, nodes, max_depth, depth=0):
+        result = []
+        for node in nodes:
+            if self._is_leaf(node):
+                result.append(node["children"]["info"])
+            elif depth >= max_depth >= 0:
+                    result.append(self._aggregate_leaf(node))
+            else:
+                result += self._summary_depth(list(node["children"].values()), max_depth, depth+1)
+        return result
 
-                # add duration percent
-                duration = pd.to_numeric(df['duration'])
-                duration_percent = duration / duration.sum()
-                df['duration_percent'] = pd.Series(['{:.3f}%'.format(v * 100) for v in duration_percent])
-                f.write(str(df))
-                f.write('\n\n')
-
-                module_time.append(OrderedDict(module_name=name,
-                                               parameters_number=pd.to_numeric(df['parameters_number']).sum(),
-                                               total_ops=pd.to_numeric(df['total_ops']).sum(),
-                                               duration=duration.sum()))
-
-            df = pd.DataFrame(module_time)
-
-            # add duration percent
-            duration = pd.to_numeric(df['duration'])
-            duration_percent = duration / duration.sum()
-            df['duration_percent'] = pd.Series(['{:.3f}%'.format(v * 100) for v in duration_percent])
-            # df.to_pickle('summary.pkl')
-            f.write(str(df))
-            f.write('\n\n')
-
-
-def main():
-    pass
-
-
-if __name__ == "__main__":
-    main()
+    def summary(self, max_depth):
+        result = self._summary_depth([self.summary_tree], max_depth)
+        df = pd.DataFrame(result)
+        df['duration_percent'] = df['duration'] / df['duration'].sum()
+        df = self._pretty_format(df)
+        df.to_excel('summary.xlsx', 'summary')
+        print(df)
