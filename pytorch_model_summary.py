@@ -60,7 +60,10 @@ class PyTorchModelSummary(object):
         df['memory'] = df['memory'].apply(lambda x: '{:.2f}MB'.format(x))
         df['duration'] = df['duration'].apply(lambda x: '{:.2f}ms'.format(x * 1000))
         df['duration_percent'] = df['duration_percent'].apply(lambda x: '{:.2%}'.format(x))
-        df.columns = ['module name', 'input shape', 'output shape', 'parameters quantity', 'memory', 'opertaion quantity', 'run time', 'run time percent']
+        if len(df.columns) == 8:
+            df.columns = ['module name', 'input shape', 'output shape', 'parameters quantity', 'memory', 'opertaion quantity', 'run time', 'run time percent']
+        elif len(df.columns) == 6:
+            df.columns = ['module name', 'parameters quantity', 'memory', 'opertaion quantity', 'run time', 'run time percent']
         return df
 
     @staticmethod
