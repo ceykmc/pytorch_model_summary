@@ -30,7 +30,7 @@ def count_conv2d(m, x, y):
     total_add_ops = num_out_elements * add_ops * m.groups
     total_ops = total_mul_ops + total_add_ops
     # incase same conv is used multiple times
-    m.total_ops += torch.Tensor([int(total_ops)])
+    m.total_ops += torch.IntTensor([int(total_ops)])
 
 
 def count_bn2d(m, x, y):
@@ -41,7 +41,7 @@ def count_bn2d(m, x, y):
     total_div = nelements
     total_ops = total_sub + total_div
 
-    m.total_ops += torch.Tensor([int(total_ops)])
+    m.total_ops += torch.IntTensor([int(total_ops)])
 
 
 def count_relu(m, x, y):
@@ -50,7 +50,7 @@ def count_relu(m, x, y):
     nelements = x.numel()
     total_ops = nelements
 
-    m.total_ops += torch.Tensor([int(total_ops)])
+    m.total_ops += torch.IntTensor([int(total_ops)])
 
 
 def count_softmax(m, x, y):
@@ -63,7 +63,7 @@ def count_softmax(m, x, y):
     total_div = nfeatures
     total_ops = batch_size * (total_exp + total_add + total_div)
 
-    m.total_ops += torch.Tensor([int(total_ops)])
+    m.total_ops += torch.IntTensor([int(total_ops)])
 
 
 def count_maxpool(m, x, y):
@@ -71,7 +71,7 @@ def count_maxpool(m, x, y):
     num_elements = y.numel()
     total_ops = kernel_ops * num_elements
 
-    m.total_ops += torch.Tensor([int(total_ops)])
+    m.total_ops += torch.IntTensor([int(total_ops)])
 
 
 def count_avgpool(m, x, y):
@@ -81,7 +81,7 @@ def count_avgpool(m, x, y):
     num_elements = y.numel()
     total_ops = kernel_ops * num_elements
 
-    m.total_ops += torch.Tensor([int(total_ops)])
+    m.total_ops += torch.IntTensor([int(total_ops)])
 
 
 def count_linear(m, x, y):
@@ -92,7 +92,7 @@ def count_linear(m, x, y):
     # total_ops = (total_mul + total_add) * num_elements
     total_ops = total_mul * num_elements
 
-    m.total_ops += torch.Tensor([int(total_ops)])
+    m.total_ops += torch.IntTensor([int(total_ops)])
 
 
 def hook_count_function(model):
