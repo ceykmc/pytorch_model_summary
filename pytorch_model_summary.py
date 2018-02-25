@@ -17,14 +17,14 @@ class PyTorchModelSummary(object):
         assert isinstance(model, nn.Module)
         assert isinstance(input_size, (list, tuple))
 
-        self.summary_tree = OrderedDict(fullname='root', children=OrderedDict())  # 统计树
+        self.summary_tree = OrderedDict(fullname='root', children=OrderedDict())
 
         self._model = model
         self._input_size = input_size
         self._origin_call = dict()  # sub module call hook
 
         self._hook_model()
-        x = Variable(torch.rand(1, *self._input_size))
+        x = Variable(torch.rand(16, *self._input_size))
         self._model(x)
 
         self._collect_summary()
@@ -42,9 +42,13 @@ class PyTorchModelSummary(object):
 
     @staticmethod
     def _get_module_summary(name, module):
+        input_shape_np = module.input_shape.numpy().tolist()
+        input_shape = ' '.join(['{:>3d}'] * len(input_shape_np)).format(*[e for e in input_shape_np])
+        output_shape_np = module.output_shape.numpy().tolist()
+        output_shape = ' '.join(['{:>3d}'] * len(input_shape_np)).format(*[e for e in output_shape_np])
         return OrderedDict(module_name=name + str(module.__class__).split('.')[-1].split("'")[0],
-                           input_shape=module.input_shape.numpy().tolist(),
-                           output_shape=module.output_shape.numpy().tolist(),
+                           input_shape=input_shape,
+                           output_shape=output_shape,
                            parameters_number=int(module.nb_params.numpy()),
                            memory=float(module.memory.numpy()),
                            total_ops=int(module.total_ops.numpy()),
@@ -85,7 +89,7 @@ class PyTorchModelSummary(object):
                 params += torch.numel(p.data)
             module.nb_params = torch.IntTensor([params])
             memory += params
-            memory = memory * 4 / (1024 ** 2)  # 单位是MB
+            memory = memory * 4 / (1024 ** 2)
             module.memory = torch.FloatTensor([memory])
             return result
 
@@ -99,20 +103,20 @@ class PyTorchModelSummary(object):
         hook_count_function(self._model)
         self._sub_module_call_hook()
 
-    def _retrive_modules(self, model, prefix=''):
+    def _retrieve_leaf_modules(self, model, prefix=''):
         modules = []
         for name, module in model._modules.items():
             if module is None:
                 continue
             if len(list(module.children())) > 0:
-                modules += self._retrive_modules(module, prefix + ('' if prefix == '' else '.') + name)
+                modules += self._retrieve_leaf_modules(module, prefix + ('' if prefix == '' else '.') + name)
             else:
                 modules.append((prefix + ('' if prefix == '' else '.') + name, module))
         return modules
 
     def _collect_summary(self):
-        modules = self._retrive_modules(self._model)
-        for name, module in modules:
+        leaf_modules = self._retrieve_leaf_modules(self._model)
+        for name, leaf_module in leaf_modules:
             name_parts = name.split('.')
             node = self.summary_tree["children"]
             fullname = ''
@@ -125,7 +129,7 @@ class PyTorchModelSummary(object):
                     }
                 node = node[part]["children"]
                 fullname += '.'
-            node['info'] = self._get_module_summary(fullname, module)
+            node['info'] = self._get_module_summary(fullname, leaf_module)
 
     def _aggregate_leaf(self, node):
         if self._is_leaf(node):
