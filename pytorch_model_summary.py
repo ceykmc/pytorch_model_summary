@@ -7,6 +7,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 import pandas as pd
 from profile import hook_count_function
+import json
 
 pd.set_option('display.width', 1000)
 pd.set_option('display.max_rows', 10000)
@@ -17,6 +18,8 @@ class PyTorchModelSummary(object):
         assert isinstance(model, nn.Module)
         assert isinstance(input_size, (list, tuple))
 
+        self.summary_tree = OrderedDict(fullname='root', children=OrderedDict())  # 统计树
+
         self._model = model
         self._input_size = input_size
         self._origin_call = dict()  # sub module call hook
@@ -24,6 +27,8 @@ class PyTorchModelSummary(object):
         self._hook_model()
         x = Variable(torch.rand(1, *self._input_size))
         self._model(x)
+
+        self._collect_summary()
 
     @staticmethod
     def _register_buffer(module):
@@ -87,65 +92,103 @@ class PyTorchModelSummary(object):
                            total_ops=total_ops,
                            duration=duration)
 
-    def _get_model_summary(self, model, prefix=''):
-        model_summary = list()
+    @staticmethod
+    def _get_module_summary(name, module):
+        return OrderedDict(module_name=name + str(module.__class__).split('.')[-1].split("'")[0],
+                           input_shape=module.input_shape.numpy().tolist(),
+                           output_shape=module.output_shape.numpy().tolist(),
+                           parameters_number=int(module.nb_params.numpy()[0]),
+                           total_ops=int(module.total_ops.numpy()[0]),
+                           duration=float(module.duration.numpy()[0]))
+
+    @staticmethod
+    def _node_to_print_format(node):
+        return OrderedDict(module_name=node['module_name'],
+                           input_shape=' '.join(['{:>3d}'] * len(node['input_shape'])).format(*[e for e in node['input_shape']]),
+                           output_shape=' '.join(['{:>3d}'] * len(node['output_shape'])).format(*[e for e in node['output_shape']]),
+                           parameters_number='{:>5d}'.format(node['parameters_number']),
+                           total_ops='{:>5d}'.format(node['total_ops']),
+                           duration='{:.5f}'.format(node['duration']))
+
+    def _retrive_modules(self, model, prefix=''):
+        modules = []
         for name, module in model._modules.items():
             if module is None:
                 continue
-            if len(list(module.children())) == 0:
-                info = self._test_module(name, module, prefix)
-                model_summary.append(info)
+            if len(list(module.children())) > 0:
+                modules += self._retrive_modules(module, prefix + ('' if prefix == '' else '.') + name)
             else:
-                model_summary += self._get_model_summary(module, prefix=prefix + ('.' if prefix else '') + name)
-        return model_summary
+                modules.append((prefix + ('' if prefix == '' else '.') + name, module))
+        return modules
 
-    def summary(self):
-        with open('summary.txt', 'w') as f:
-            model_summary = self._get_model_summary(self._model)
-            df = pd.DataFrame(model_summary)
+    def _collect_summary(self):
+        modules = self._retrive_modules(self._model)
+        for name, module in modules:
+            name_parts = name.split('.')
+            node = self.summary_tree["children"]
+            fullname = ''
+            for part in name_parts:
+                fullname += part
+                if part not in node:
+                    node[part] = {
+                        "fullname": fullname,
+                        "children": {}
+                    }
+                node = node[part]["children"]
+                fullname += '.'
+            node['info'] = self._get_module_summary(fullname, module)
 
-            # add duration percent
-            duration = pd.to_numeric(df['duration'])
-            duration_percent = duration / duration.sum()
-            df['duration_percent'] = pd.Series(['{:.3f}%'.format(v * 100) for v in duration_percent])
-            # df.to_pickle('summary.pkl')
-            f.write(str(df))
-            f.write('\n\n')
+    @staticmethod
+    def _is_leaf(node):
+        return 'info' in node["children"]
 
-            module_time = []
-            for name, module in self._model._modules.items():
-                if len(list(module.children())) == 0:
-                    continue
-                f.write('module {}\n'.format(name))
-                model_summary = self._get_model_summary(module, name)
-                df = pd.DataFrame(model_summary)
+    def _aggregate_leaf(self, node):
+        if self._is_leaf(node):
+            return OrderedDict(parameters_number=node["children"]['info']['parameters_number'],
+                               total_ops=node["children"]['info']['total_ops'],
+                               duration=node["children"]['info']['duration'])
+        else:
+            parameters_number = 0
+            total_ops = 0
+            duration = 0
+            for key in node["children"]:
+                son = self._aggregate_leaf(node["children"][key])
+                parameters_number += son['parameters_number']
+                total_ops += son['total_ops']
+                duration += son['duration']
+            return OrderedDict(module_name=node["fullname"],
+                               parameters_number=parameters_number,
+                               total_ops=total_ops,
+                               duration=duration)
 
-                # add duration percent
-                duration = pd.to_numeric(df['duration'])
-                duration_percent = duration / duration.sum()
-                df['duration_percent'] = pd.Series(['{:.3f}%'.format(v * 100) for v in duration_percent])
-                f.write(str(df))
-                f.write('\n\n')
+    def _summary_leaf(self):
+        queue = [self.summary_tree]
+        result = []
+        while len(queue) > 0:
+            node = queue[0]
+            del queue[0]
+            if self._is_leaf(node):
+                result.append(self._node_to_print_format(node["children"]['info']))
+            else:
+                for key in node["children"]:
+                    queue.append(node["children"][key])
+        df = pd.DataFrame(result)
+        return df
 
-                module_time.append(OrderedDict(module_name=name,
-                                               parameters_number=pd.to_numeric(df['parameters_number']).sum(),
-                                               total_ops=pd.to_numeric(df['total_ops']).sum(),
-                                               duration=duration.sum()))
+    def _summary_depth(self, nodes, max_depth, depth=0):
+        result = []
+        for node in nodes:
+            if self._is_leaf(node):
+                result.append(node["children"]["info"])
+            elif depth >= max_depth >= 0:
+                    result.append(self._aggregate_leaf(node))
+            else:
+                result += self._summary_depth(list(node["children"].values()), max_depth, depth+1)
+        return result
 
-            df = pd.DataFrame(module_time)
-
-            # add duration percent
-            duration = pd.to_numeric(df['duration'])
-            duration_percent = duration / duration.sum()
-            df['duration_percent'] = pd.Series(['{:.3f}%'.format(v * 100) for v in duration_percent])
-            # df.to_pickle('summary.pkl')
-            f.write(str(df))
-            f.write('\n\n')
-
-
-def main():
-    pass
-
-
-if __name__ == "__main__":
-    main()
+    def summary(self, max_depth):
+        result = self._summary_depth([self.summary_tree], max_depth)
+        df = pd.DataFrame(result)
+        df['duration_percent'] = df['duration'] / df['duration'].sum()
+        df['duration_percent'] = df['duration_percent'].apply(lambda x: '{:.2%}'.format(x))
+        print(df)

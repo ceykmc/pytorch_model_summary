@@ -3,6 +3,7 @@
 import torch.nn as nn
 import torchvision.models as tv_models
 from pytorch_model_summary import PyTorchModelSummary
+import argparse
 
 
 class CustomModel(nn.Module):
@@ -21,31 +22,34 @@ class CustomModel(nn.Module):
         return x
 
 
-def reset_net_test():
+def reset_net_test(max_depth):
     model = tv_models.resnet50()
     input_size = (3, 224, 224)
     model_summary = PyTorchModelSummary(model, input_size)
-    model_summary.summary()
+    model_summary.summary(max_depth)
 
 
-def vgg16_test():
+def vgg16_test(max_depth):
     model = tv_models.resnet50()
     input_size = (3, 224, 224)
     model_summary = PyTorchModelSummary(model, input_size)
-    model_summary.summary()
+    model_summary.summary(max_depth)
 
 
-def custom_model_test():
+def custom_model_test(max_depth):
     model = CustomModel()
     input_size = (3, 144, 160)
     model_summary = PyTorchModelSummary(model, input_size)
-    model_summary.summary()
+    model_summary.summary(max_depth)
 
 
 def main():
-    reset_net_test()
-    # vgg16_test()
-    # custom_model_test()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--max_depth', default=-1, type=int)
+    args = parser.parse_args()
+    reset_net_test(args.max_depth)
+    # vgg16_test(args.max_depth)
+    # custom_model_test(args.max_depth)
 
 
 if __name__ == "__main__":
