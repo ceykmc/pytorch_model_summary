@@ -22,7 +22,7 @@ class CustomModel(nn.Module):
         return x
 
 
-def reset_net_test(max_depth):
+def resnet50_test(max_depth):
     model = tv_models.resnet50()
     input_size = (3, 224, 224)
     model_summary = PyTorchModelSummary(model, input_size)
@@ -47,7 +47,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--max_depth', default=-1, type=int)
     args = parser.parse_args()
-    reset_net_test(args.max_depth)
+    resnet50_test(args.max_depth)
     # vgg16_test(args.max_depth)
     # custom_model_test(args.max_depth)
 
