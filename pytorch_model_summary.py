@@ -2,11 +2,12 @@
 
 import time
 from collections import OrderedDict
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import pandas as pd
-from profile import hook_count_function
+from module_madd import compute_module_madd
 
 pd.set_option('display.width', 1000)
 pd.set_option('display.max_rows', 10000)
@@ -24,7 +25,8 @@ class PyTorchModelSummary(object):
         self._origin_call = dict()  # sub module call hook
 
         self._hook_model()
-        x = Variable(torch.rand(16, *self._input_size))
+        x = Variable(torch.rand(16, *self._input_size))  # add module duration time
+        self._model.eval()
         self._model(x)
 
         self._collect_summary()
@@ -33,12 +35,59 @@ class PyTorchModelSummary(object):
     def _register_buffer(module):
         assert isinstance(module, nn.Module)
 
-        module.register_buffer('input_shape', torch.IntTensor())
-        module.register_buffer('output_shape', torch.IntTensor())
-        module.register_buffer('nb_params', torch.IntTensor([0]))
-        module.register_buffer('memory', torch.FloatTensor([0.0]))
-        module.register_buffer('total_ops', torch.IntTensor([0]))
-        module.register_buffer('duration', torch.FloatTensor([0.0]))
+        if len(list(module.children())) > 0:
+            return
+
+        module.register_buffer('input_shape', torch.zeros(3).int())
+        module.register_buffer('output_shape', torch.zeros(3).int())
+        module.register_buffer('parameters_quantity', torch.zeros(1).int())
+        module.register_buffer('inference_memory', torch.zeros(1).long())
+        module.register_buffer('MAdd', torch.zeros(1).long())
+        module.register_buffer('duration', torch.zeros(1).float())
+
+    def _sub_module_call_hook(self):
+        def wrap_call(module, *input, **kwargs):
+            assert module.__class__ in self._origin_call
+
+            start = time.time()
+            output = self._origin_call[module.__class__](module, *input, **kwargs)
+            end = time.time()
+            module.duration = torch.from_numpy(
+                np.array([end - start], dtype=np.float32))
+
+            module.input_shape = torch.from_numpy(
+                np.array(input[0].size()[1:], dtype=np.int32))
+            module.output_shape = torch.from_numpy(
+                np.array(output.size()[1:], dtype=np.int32))
+
+            parameters_quantity = 0
+            # iterate through parameters and count num params
+            for name, p in module._parameters.items():
+                parameters_quantity += (0 if p is None else torch.numel(p.data))
+            module.parameters_quantity = torch.from_numpy(
+                np.array([parameters_quantity], dtype=np.long))
+
+            inference_memory = 1
+            for i in range(1, len(output.size()[1:])):
+                inference_memory *= output.size()[i]
+            # memory += parameters_number  # exclude parameter memory
+            inference_memory = inference_memory * 4 / (1024 ** 2)  # shown as MB unit
+            module.inference_memory = torch.from_numpy(
+                np.array([inference_memory], dtype=np.float32))
+
+            madd = compute_module_madd(module, input[0], output)
+            module.MAdd = torch.from_numpy(
+                np.array([madd], dtype=np.int32))
+            return output
+
+        for module in self._model.modules():
+            if len(list(module.children())) == 0 and module.__class__ not in self._origin_call:
+                self._origin_call[module.__class__] = module.__class__.__call__
+                module.__class__.__call__ = wrap_call
+
+    def _hook_model(self):
+        self._model.apply(self._register_buffer)
+        self._sub_module_call_hook()
 
     @staticmethod
     def _get_module_summary(name, module):
@@ -49,62 +98,10 @@ class PyTorchModelSummary(object):
         return OrderedDict(module_name=name + str(module.__class__).split('.')[-1].split("'")[0],
                            input_shape=input_shape,
                            output_shape=output_shape,
-                           parameters_number=int(module.nb_params.numpy()),
-                           memory=float(module.memory.numpy()),
-                           total_ops=int(module.total_ops.numpy()),
-                           duration=float(module.duration.numpy()))
-
-    @staticmethod
-    def _pretty_format(df):
-        df = df.fillna(' ')
-        df['memory'] = df['memory'].apply(lambda x: '{:.2f}MB'.format(x))
-        df['duration'] = df['duration'].apply(lambda x: '{:.2f}ms'.format(x * 1000))
-        df['duration_percent'] = df['duration_percent'].apply(lambda x: '{:.2%}'.format(x))
-        if len(df.columns) == 8:
-            df.columns = ['module name', 'input shape', 'output shape', 'parameters quantity', 'memory', 'opertaion quantity', 'run time', 'run time percent']
-        elif len(df.columns) == 6:
-            df.columns = ['module name', 'parameters quantity', 'memory', 'opertaion quantity', 'run time', 'run time percent']
-        return df
-
-    @staticmethod
-    def _is_leaf(node):
-        return 'info' in node["children"]
-
-    def _sub_module_call_hook(self):
-        def wrap_call(module, *input, **kwargs):
-            assert module.__class__ in self._origin_call
-
-            start = time.time()
-            result = self._origin_call[module.__class__](module, *input, **kwargs)
-            end = time.time()
-            module.duration = torch.FloatTensor([end - start])
-
-            module.input_shape = torch.IntTensor(list(input[0].size())[1:])
-            module.output_shape = torch.IntTensor(list(result.size())[1:])
-            memory = 1
-            for p in result.size():
-                memory *= p
-            params = 0
-            # iterate through parameters and count num params
-            for name, p in module._parameters.items():
-                if p is None:
-                    continue
-                params += torch.numel(p.data)
-            module.nb_params = torch.IntTensor([params])
-            memory += params
-            memory = memory * 4 / (1024 ** 2)
-            module.memory = torch.FloatTensor([memory])
-            return result
-
-        for module in self._model.modules():
-            if len(list(module.children())) == 0 and module.__class__ not in self._origin_call:
-                self._origin_call[module.__class__] = module.__class__.__call__
-                module.__class__.__call__ = wrap_call
-
-    def _hook_model(self):
-        self._model.apply(self._register_buffer)
-        hook_count_function(self._model)
-        self._sub_module_call_hook()
+                           parameters_quantity=module.parameters_quantity.numpy()[0],
+                           memory=module.inference_memory.numpy()[0],
+                           madd=module.MAdd.numpy()[0],
+                           duration=module.duration.numpy()[0])
 
     def _retrieve_leaf_modules(self, model, prefix=''):
         modules = []
@@ -112,7 +109,8 @@ class PyTorchModelSummary(object):
             if module is None:
                 continue
             if len(list(module.children())) > 0:
-                modules += self._retrieve_leaf_modules(module, prefix + ('' if prefix == '' else '.') + name)
+                modules += self._retrieve_leaf_modules(
+                    module, prefix + ('' if prefix == '' else '.') + name)
             else:
                 modules.append((prefix + ('' if prefix == '' else '.') + name, module))
         return modules
@@ -136,26 +134,30 @@ class PyTorchModelSummary(object):
 
     def _aggregate_leaf(self, node):
         if self._is_leaf(node):
-            return OrderedDict(parameters_number=node["children"]["info"]["parameters_number"],
+            return OrderedDict(parameters_number=node["children"]["info"]["parameters_quantity"],
                                memory=node["children"]["info"]["memory"],
-                               total_ops=node["children"]["info"]["total_ops"],
+                               total_madd=node["children"]["info"]["madd"],
                                duration=node["children"]["info"]["duration"])
         else:
-            parameters_number = 0
+            parameters_quantity = 0
             memory = 0
-            total_ops = 0
+            total_madd = 0
             duration = 0
             for key in node["children"]:
                 son = self._aggregate_leaf(node["children"][key])
-                parameters_number += son["parameters_number"]
+                parameters_quantity += son["parameters_quantity"]
                 memory += son["memory"]
-                total_ops += son["total_ops"]
+                total_madd += son["total_madd"]
                 duration += son["duration"]
             return OrderedDict(module_name=node["fullname"],
-                               parameters_number=parameters_number,
+                               parameters_quantity=parameters_quantity,
                                memory=memory,
-                               total_ops=total_ops,
+                               madd=total_madd,
                                duration=duration)
+
+    @staticmethod
+    def _is_leaf(node):
+        return 'info' in node["children"]
 
     def _summary_depth(self, nodes, max_depth, depth=0):
         result = []
@@ -168,19 +170,38 @@ class PyTorchModelSummary(object):
                 result += self._summary_depth(list(node["children"].values()), max_depth, depth+1)
         return result
 
+    @staticmethod
+    def _pretty_format(df):
+        df = df.fillna(' ')
+        df['memory'] = df['memory'].apply(lambda x: '{:.2f}MB'.format(x))
+        df['duration'] = df['duration'].apply(lambda x: '{:.2f}ms'.format(x * 1000))
+        df['duration_percent'] = df['duration_percent'].apply(lambda x: '{:.2%}'.format(x))
+        del df['duration']
+        df.columns = ['module name', 'input shape', 'output shape', 'parameters quantity', 'memory',
+                      'MAdd', 'run time percent']
+        # if len(df.columns) == 8:
+        #     df.columns = ['module name', 'input shape', 'output shape', 'parameters quantity', 'memory',
+        #                   'parameters quantity', 'run time', 'run time percent']
+        # elif len(df.columns) == 6:
+        #     df.columns = ['module name', 'parameters quantity', 'memory', 'opertaion quantity', 'run time',
+        #                   'run time percent']
+        return df
+
     def summary(self, max_depth):
         result = self._summary_depth([self.summary_tree], max_depth)
         df = pd.DataFrame(result)
-        total_parameters_quantity = df['parameters_number'].sum()
-        total_memory = '{:.2f}MB'.format(df['memory'].sum())
-        total_operation_quantity = df['total_ops'].sum()
-        total_run_time = '{:.2f}ms'.format(df['duration'].sum() * 1000)
         df['duration_percent'] = df['duration'] / df['duration'].sum()
+        total_parameters_quantity = df['parameters_quantity'].sum()
+        total_memory = df['memory'].sum()
+        total_operation_quantity = df['madd'].sum()
+
         df = self._pretty_format(df)
-        df.to_excel('summary.xlsx', 'summary')
-        print(df)
-        print("=" * len(str(df).split('\n')[0]))
-        print("total parameters quantity: {}".format(total_parameters_quantity))
-        print("total memory: {}".format(total_memory))
-        print("total operation quantity: {}".format(total_operation_quantity))
-        print("total run time: {}".format(total_run_time))
+        model_summary = str(df) + '\n'
+        model_summary += "=" * len(str(df).split('\n')[0])
+        model_summary += '\n'
+        model_summary += "total parameters quantity: {:,}\n".format(total_parameters_quantity)
+        model_summary += "total memory: {:.2f}MB\n".format(total_memory)
+        model_summary += "total operation quantity: {:,}\n".format(total_operation_quantity)
+        print(model_summary)
+        with open('model_summary.txt', 'w') as model_summary_file:
+            model_summary_file.write(model_summary)
