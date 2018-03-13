@@ -73,10 +73,11 @@ def compute_AvgPool2d_madd(module, inp, out):
 
 def compute_ReLU_madd(module, inp, out):
     assert isinstance(module, nn.ReLU)
-    assert len(inp.size()) == 4 and len(inp.size()) == len(out.size())
 
-    in_c, in_h, in_w = inp.size()[1:]
-    return in_c * in_h * in_w
+    count = 1
+    for i in inp.size()[1:]:
+        count *= i
+    return count
 
 
 def compute_Softmax_madd(module, inp, out):

@@ -77,7 +77,7 @@ class PyTorchModelSummary(object):
 
             madd = compute_module_madd(module, input[0], output)
             module.MAdd = torch.from_numpy(
-                np.array([madd], dtype=np.int32))
+                np.array([madd], dtype=np.int64))
             return output
 
         for module in self._model.modules():
@@ -179,12 +179,6 @@ class PyTorchModelSummary(object):
         del df['duration']
         df.columns = ['module name', 'input shape', 'output shape', 'parameters quantity', 'memory',
                       'MAdd', 'run time percent']
-        # if len(df.columns) == 8:
-        #     df.columns = ['module name', 'input shape', 'output shape', 'parameters quantity', 'memory',
-        #                   'parameters quantity', 'run time', 'run time percent']
-        # elif len(df.columns) == 6:
-        #     df.columns = ['module name', 'parameters quantity', 'memory', 'opertaion quantity', 'run time',
-        #                   'run time percent']
         return df
 
     def summary(self, max_depth):
@@ -201,7 +195,7 @@ class PyTorchModelSummary(object):
         model_summary += '\n'
         model_summary += "total parameters quantity: {:,}\n".format(total_parameters_quantity)
         model_summary += "total memory: {:.2f}MB\n".format(total_memory)
-        model_summary += "total operation quantity: {:,}\n".format(total_operation_quantity)
+        model_summary += "total MAdd: {:,}\n".format(total_operation_quantity)
         print(model_summary)
         with open('model_summary.txt', 'w') as model_summary_file:
             model_summary_file.write(model_summary)
