@@ -72,7 +72,7 @@ def compute_AvgPool2d_madd(module, inp, out):
 
 
 def compute_ReLU_madd(module, inp, out):
-    assert isinstance(module, nn.ReLU)
+    assert isinstance(module, (nn.ReLU, nn.ReLU6))
 
     count = 1
     for i in inp.size()[1:]:
@@ -114,7 +114,7 @@ def compute_module_madd(module, inp, out):
         return compute_MaxPool2d_madd(module, inp, out)
     elif isinstance(module, nn.AvgPool2d):
         return compute_AvgPool2d_madd(module, inp, out)
-    elif isinstance(module, nn.ReLU):
+    elif isinstance(module, (nn.ReLU, nn.ReLU6)):
         return compute_ReLU_madd(module, inp, out)
     elif isinstance(module, nn.Softmax):
         return compute_Softmax_madd(module, inp, out)
