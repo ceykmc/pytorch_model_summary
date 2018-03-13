@@ -1,4 +1,4 @@
-# pytorch_model_summary
+# PyTorch model summary
 pytorch model summary, statistic parameters number, memory usage, MAdd and so on
 
 use ResNet50 as an example
