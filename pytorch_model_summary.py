@@ -68,8 +68,8 @@ class PyTorchModelSummary(object):
                 np.array([parameters_quantity], dtype=np.long))
 
             inference_memory = 1
-            for i in range(1, len(output.size()[1:])):
-                inference_memory *= output.size()[i]
+            for s in output.size()[1:]:
+                inference_memory *= s
             # memory += parameters_number  # exclude parameter memory
             inference_memory = inference_memory * 4 / (1024 ** 2)  # shown as MB unit
             module.inference_memory = torch.from_numpy(
