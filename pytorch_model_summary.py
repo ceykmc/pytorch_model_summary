@@ -176,6 +176,7 @@ class PyTorchModelSummary(object):
         df['memory'] = df['memory'].apply(lambda x: '{:.2f}MB'.format(x))
         df['duration'] = df['duration'].apply(lambda x: '{:.2f}ms'.format(x * 1000))
         df['duration_percent'] = df['duration_percent'].apply(lambda x: '{:.2%}'.format(x))
+        df['madd'] = df['madd'].apply(lambda x: '{:,}'.format(x))
         del df['duration']
         df.columns = ['module name', 'input shape', 'output shape', 'parameters quantity', 'memory',
                       'MAdd', 'run time percent']
