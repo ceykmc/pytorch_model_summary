@@ -20,7 +20,7 @@ class CModelHook(object):
         self._origin_call = dict()  # sub module call hook
 
         self._hook_model()
-        x = Variable(torch.rand(16, *self._input_size))  # add module duration time
+        x = Variable(torch.rand(1, *self._input_size))  # add module duration time
         self._model.eval()
         self._model(x)
 
@@ -33,7 +33,7 @@ class CModelHook(object):
 
         module.register_buffer('input_shape', torch.zeros(3).int())
         module.register_buffer('output_shape', torch.zeros(3).int())
-        module.register_buffer('parameters_quantity', torch.zeros(1).int())
+        module.register_buffer('parameter_quantity', torch.zeros(1).int())
         module.register_buffer('inference_memory', torch.zeros(1).long())
         module.register_buffer('MAdd', torch.zeros(1).long())
         module.register_buffer('duration', torch.zeros(1).float())
@@ -53,12 +53,12 @@ class CModelHook(object):
             module.output_shape = torch.from_numpy(
                 np.array(output.size()[1:], dtype=np.int32))
 
-            parameters_quantity = 0
+            parameter_quantity = 0
             # iterate through parameters and count num params
             for name, p in module._parameters.items():
-                parameters_quantity += (0 if p is None else torch.numel(p.data))
-            module.parameters_quantity = torch.from_numpy(
-                np.array([parameters_quantity], dtype=np.long))
+                parameter_quantity += (0 if p is None else torch.numel(p.data))
+            module.parameter_quantity = torch.from_numpy(
+                np.array([parameter_quantity], dtype=np.long))
 
             inference_memory = 1
             for s in output.size()[1:]:
@@ -89,6 +89,8 @@ class CModelHook(object):
             if len(list(module.children())) > 0:
                 leaf_modules += self._retrieve_leaf_modules(module, name)
             else:
+                # add operation type name
+                name = name + '_' + str(module)[0:str(module).find('(')]
                 leaf_modules.append((name, module))
         return leaf_modules
 

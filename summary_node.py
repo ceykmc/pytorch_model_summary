@@ -2,7 +2,7 @@
 
 
 class CSummaryNode(object):
-    def __init__(self, name=str()):
+    def __init__(self, name=str(), create_index=1):
         self._name = name
         self._input_shape = None
         self._output_shape = None
@@ -12,7 +12,10 @@ class CSummaryNode(object):
         self._duration = 0
         self._duration_percent = 0
 
-        self._children = list()
+        self._granularity = 1
+        self._depth = 1
+        self.create_index = create_index
+        self.children = list()
 
     @property
     def name(self):
@@ -23,11 +26,26 @@ class CSummaryNode(object):
         self._name = name
 
     @property
+    def granularity(self):
+        return self._granularity
+
+    @granularity.setter
+    def granularity(self, g):
+        self._granularity = g
+
+    @property
+    def depth(self):
+        d = self._depth
+        if len(self.children) > 0:
+            d += max([child.depth for child in self.children])
+        return d
+
+    @property
     def input_shape(self):
-        if len(self._children) == 0:  # leaf
+        if len(self.children) == 0:  # leaf
             return self._input_shape
         else:
-            return self._children[0].input_shape
+            return self.children[0].input_shape
     
     @input_shape.setter
     def input_shape(self, input_shape):
@@ -36,10 +54,10 @@ class CSummaryNode(object):
         
     @property
     def output_shape(self):
-        if len(self._children) == 0:  # leaf
+        if len(self.children) == 0:  # leaf
             return self._output_shape
         else:
-            return self._children[-1].output_shape
+            return self.children[-1].output_shape
     
     @output_shape.setter
     def output_shape(self, output_shape):
@@ -50,7 +68,7 @@ class CSummaryNode(object):
     def parameter_quantity(self):
         # return self.parameters_quantity
         total_parameter_quantity = self._parameter_quantity
-        for child in self._children:
+        for child in self.children:
             total_parameter_quantity += child.parameter_quantity
         return total_parameter_quantity
     
@@ -62,7 +80,7 @@ class CSummaryNode(object):
     @property
     def inference_memory(self):
         total_inference_memory = self._inference_memory
-        for child in self._children:
+        for child in self.children:
             total_inference_memory += child.inference_memory
         return total_inference_memory
 
@@ -73,7 +91,7 @@ class CSummaryNode(object):
     @property
     def MAdd(self):
         total_MAdd = self._MAdd
-        for child in self._children:
+        for child in self.children:
             total_MAdd += child.MAdd
         return total_MAdd
 
@@ -84,7 +102,7 @@ class CSummaryNode(object):
     @property
     def duration(self):
         total_duration = self._duration
-        for child in self._children:
+        for child in self.children:
             total_duration += child.duration
         return total_duration
 
@@ -92,9 +110,20 @@ class CSummaryNode(object):
     def duration(self, duration):
         self._duration = duration
 
+    def find_child_index(self, child_name):
+        assert isinstance(child_name, str)
+
+        index = -1
+        for i in range(len(self.children)):
+            if child_name == self.children[i].name:
+                index = i
+        return index
+
     def add_child(self, node):
         assert isinstance(node, CSummaryNode)
-        self._children.append(node)
+
+        if self.find_child_index(node.name) == -1:  # not exist
+            self.children.append(node)
 
 
 def main():
