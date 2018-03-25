@@ -1,8 +1,48 @@
 # -*- coding: utf-8 -*-
 
+import queue
+
+
+class CSummaryTree(object):
+    def __init__(self, root_node):
+        assert isinstance(root_node, CSummaryNode)
+
+        self.root_node = root_node
+
+    def get_same_level_max_node_depth(self, query_node):
+        if query_node.name == self.root_node.name:
+            return 0
+        same_level_depth = max([child.depth for child in query_node.parent.children])
+        return same_level_depth
+
+    def update_summary_nodes_granularity(self):
+        q = queue.Queue()
+        q.put(self.root_node)
+        while not q.empty():
+            node = q.get()
+            node.granularity = self.get_same_level_max_node_depth(node)
+            for child in node.children:
+                q.put(child)
+
+    def get_collected_summary_nodes(self, query_granularity):
+        self.update_summary_nodes_granularity()
+
+        collected_nodes = []
+        stack = list()
+        stack.append(self.root_node)
+        while len(stack) > 0:
+            node = stack.pop()
+            for child in reversed(node.children):
+                stack.append(child)
+            if node.depth == query_granularity:
+                collected_nodes.append(node)
+            if node.depth < query_granularity <= node.granularity:
+                collected_nodes.append(node)
+        return collected_nodes
+
 
 class CSummaryNode(object):
-    def __init__(self, name=str(), create_index=1):
+    def __init__(self, name=str(), parent=None):
         self._name = name
         self._input_shape = None
         self._output_shape = None
@@ -14,7 +54,7 @@ class CSummaryNode(object):
 
         self._granularity = 1
         self._depth = 1
-        self.create_index = create_index
+        self.parent = parent
         self.children = list()
 
     @property

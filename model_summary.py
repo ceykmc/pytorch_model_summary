@@ -6,7 +6,7 @@ import pandas as pd
 import torch.nn as nn
 
 from model_hook import CModelHook
-from summary_node import CSummaryNode
+from summary_tree import CSummaryTree, CSummaryNode
 
 pd.set_option('display.width', 1000)
 pd.set_option('display.max_rows', 10000)
@@ -25,26 +25,18 @@ def get_parent_node(root_node, summary_node_name):
     return node
 
 
-def get_same_level_max_node_depth(root_node, query_node):
-    if query_node.name == root_node.name:
-        return root_node.depth
-    parent_node = get_parent_node(root_node, query_node.name)
-    same_level_depth = max([child.depth for child in parent_node.children])
-    return same_level_depth
-
-
-def convert_leaf_modules_to_summary_nodes(leaf_modules):
+def convert_leaf_modules_to_summary_tree(leaf_modules):
     assert isinstance(leaf_modules, OrderedDict)
 
     create_index = 1
-    root_node = CSummaryNode(name='root', create_index=create_index)
+    root_node = CSummaryNode(name='root', parent=None)
     for leaf_module_name, leaf_module in leaf_modules.items():
         names = leaf_module_name.split('.')
         for i in range(len(names)):
             create_index += 1
             summary_node_name = '.'.join(names[0:i+1])
-            node = CSummaryNode(name=summary_node_name, create_index=create_index)
             parent_node = get_parent_node(root_node, summary_node_name)
+            node = CSummaryNode(name=summary_node_name, parent=parent_node)
             parent_node.add_child(node)
             if i == len(names) - 1:  # leaf module itself
                 input_shape = leaf_module.input_shape.numpy().tolist()
@@ -55,17 +47,7 @@ def convert_leaf_modules_to_summary_nodes(leaf_modules):
                 node.inference_memory = leaf_module.inference_memory.numpy()[0]
                 node.MAdd = leaf_module.MAdd.numpy()[0]
                 node.duration = leaf_module.duration.numpy()[0]
-    return root_node
-
-
-def update_summary_nodes_granularity(root_node):
-    q = queue.Queue()
-    q.put(root_node)
-    while not q.empty():
-        node = q.get()
-        node.granularity = get_same_level_max_node_depth(root_node, node)
-        for child in node.children:
-            q.put(child)
+    return CSummaryTree(root_node)
 
 
 def get_collected_summary_nodes(root_node, query_granularity):
@@ -130,9 +112,8 @@ def model_summary(model, input_size, query_granularity=1):
 
     model_hook = CModelHook(model, input_size)
     leaf_modules = model_hook.retrieve_leaf_modules()
-    root_node = convert_leaf_modules_to_summary_nodes(leaf_modules)
-    update_summary_nodes_granularity(root_node)
-    collected_nodes = get_collected_summary_nodes(root_node, query_granularity)
+    summary_tree = convert_leaf_modules_to_summary_tree(leaf_modules)
+    collected_nodes = summary_tree.get_collected_summary_nodes(query_granularity)
     pretty_format(collected_nodes)
 
 
