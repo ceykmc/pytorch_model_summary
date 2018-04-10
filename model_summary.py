@@ -104,6 +104,7 @@ def pretty_format(collected_nodes):
     summary += "total memory: {:.2f}MB\n".format(total_memory)
     summary += "total MAdd: {:,}\n".format(total_operation_quantity)
     print(summary)
+    return summary
 
 
 def model_summary(model, input_size, query_granularity=1):
@@ -114,7 +115,8 @@ def model_summary(model, input_size, query_granularity=1):
     leaf_modules = model_hook.retrieve_leaf_modules()
     summary_tree = convert_leaf_modules_to_summary_tree(leaf_modules)
     collected_nodes = summary_tree.get_collected_summary_nodes(query_granularity)
-    pretty_format(collected_nodes)
+    summary = pretty_format(collected_nodes)
+    return summary
 
 
 def main():
