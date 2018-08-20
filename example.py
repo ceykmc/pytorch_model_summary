@@ -33,12 +33,12 @@ class CCustomNet(nn.Module):
 
 
 def main():
-    # model = tv_models.resnet50()
-    model = tv_models.vgg16()
+    model = tv_models.resnet50()
+    # model = tv_models.vgg16()
     # model = CCustomNet()
     input_size = (3, 224, 224)
 
-    model_summary(model, input_size, query_granularity=2)
+    model_summary(model, input_size, query_granularity=1)
 
 
 if __name__ == "__main__":

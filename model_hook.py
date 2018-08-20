@@ -5,7 +5,6 @@ from collections import OrderedDict
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 
 from module_madd import compute_module_madd
 
@@ -20,7 +19,7 @@ class CModelHook(object):
         self._origin_call = dict()  # sub module call hook
 
         self._hook_model()
-        x = Variable(torch.rand(1, *self._input_size))  # add module duration time
+        x = torch.rand(1, *self._input_size)  # add module duration time
         self._model.eval()
         self._model(x)
 
@@ -82,16 +81,12 @@ class CModelHook(object):
         self._model.apply(self._register_buffer)
         self._sub_module_call_hook()
 
-    def _retrieve_leaf_modules(self, model, prefix=''):
+    @staticmethod
+    def _retrieve_leaf_modules(model):
         leaf_modules = []
-        for name, module in model._modules.items():
-            name = prefix + ('' if prefix == '' else '.') + name
-            if len(list(module.children())) > 0:
-                leaf_modules += self._retrieve_leaf_modules(module, name)
-            else:
-                # add operation type name
-                name = name + '_' + str(module)[0:str(module).find('(')]
-                leaf_modules.append((name, module))
+        for name, m in model.named_modules():
+            if len(list(m.children())) == 0:
+                leaf_modules.append((name, m))
         return leaf_modules
 
     def retrieve_leaf_modules(self):
