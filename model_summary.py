@@ -86,7 +86,7 @@ def pretty_format(collected_nodes):
     df.columns = ['module name', 'input shape', 'output shape',
                   'parameter quantity', 'inference memory(MB)',
                   'MAdd', 'duration']
-    df['duration percent'] = df['duration'] / df['duration'].sum()
+    df['duration percent'] = df['duration'] / (df['duration'].sum() + 1e-7)
     total_parameters_quantity = df['parameter quantity'].sum()
     total_memory = df['inference memory(MB)'].sum()
     total_operation_quantity = df['MAdd'].sum()

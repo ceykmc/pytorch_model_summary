@@ -126,6 +126,19 @@ def compute_Linear_madd(module, inp, out):
     return num_out_features * (mul + add)
 
 
+def compute_Bilinear_madd(module, inp1, inp2, out):
+    assert isinstance(module, nn.Bilinear)
+    assert len(inp1.size()) == 2 and len(inp2.size()) == 2 and len(out.size()) == 2
+
+    num_in_features_1 = inp1.size()[1]
+    num_in_features_2 = inp2.size()[1]
+    num_out_features = out.size()[1]
+
+    mul = num_in_features_1 * num_in_features_2 + num_in_features_2
+    add = num_in_features_1 * num_in_features_2 + num_in_features_2 - 1
+    return num_out_features * (mul + add)
+
+
 def compute_module_madd(module, inp, out):
     if isinstance(module, nn.Conv2d):
         return compute_Conv2d_madd(module, inp, out)
@@ -143,7 +156,10 @@ def compute_module_madd(module, inp, out):
         return compute_Softmax_madd(module, inp, out)
     elif isinstance(module, nn.Linear):
         return compute_Linear_madd(module, inp, out)
+    elif isinstance(module, nn.Bilinear):
+        return compute_Bilinear_madd(module, inp[0], inp[1], out)
     else:
+        print(f"{type(module).__name__} is unsupported!")
         return 0
 
 

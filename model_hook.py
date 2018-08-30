@@ -67,7 +67,12 @@ class CModelHook(object):
             module.inference_memory = torch.from_numpy(
                 np.array([inference_memory], dtype=np.float32))
 
-            madd = compute_module_madd(module, input[0], output)
+            if len(input) == 1:
+                madd = compute_module_madd(module, input[0], output)
+            elif len(input) > 1:
+                madd = compute_module_madd(module, input, output)
+            else:  # error
+                madd = 0
             module.MAdd = torch.from_numpy(
                 np.array([madd], dtype=np.int64))
             return output
