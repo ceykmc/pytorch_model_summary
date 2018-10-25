@@ -10,6 +10,7 @@ from summary_tree import CSummaryTree, CSummaryNode
 
 pd.set_option('display.width', 1000)
 pd.set_option('display.max_rows', 10000)
+pd.set_option('display.max_columns', 10000)
 
 
 def get_parent_node(root_node, summary_node_name):
